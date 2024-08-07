@@ -3,14 +3,255 @@
 ---
 
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Image Resize</title>
+    <style>
+      td {
+        border: 2px solid lightblue;
+        padding: 10px;
+        vertical-align: top;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>GammaCV</h1>
+    <table>
+      <tr>
+        <td>
+          <p>Input Image:</p>
+          <img id="input-image" src="/image.jpg" width="300px" />
+        </td>
+        <td>
+          <p>Output Image:</p>
+          <canvas id="output-image" style="width: 300px"></canvas>
+        </td>
+      </tr>
+    </table>
+   <script>
+      import * as gm from "gammacv";
+      import { analysisResult } from "../data/data";
+
+      export async function transformImage(): Promise<void> {
+        console.log("Start Image Transformation");
+
+        const input = await gm.imageTensorFromURL("/image.jpg", "uint8");
+
+        // Get the rescaled width and height from the analysis result
+        const rescaleWidth = analysisResult.rescale_width;
+        const rescaleHeight = analysisResult.rescale_height;
+
+        console.log("3. rescaleWidth", rescaleWidth);
+        console.log("3.1. rescaleHeight", rescaleHeight);
+
+        // Calculate the offset width and height based on the margin width and height from the analysis result
+        const offsetWidth = rescaleWidth * analysisResult.margin_width;
+        const offsetHeight = rescaleHeight * analysisResult.margin_height;
+
+        console.log("4. offsetWidth", offsetWidth);
+        console.log("4.1. offsetHeight", offsetHeight);
+
+        // The Rect TL, TR, BR, BL
+        const rect = new gm.Rect(
+          analysisResult.a4_top_left[0],
+          analysisResult.a4_top_left[1],
+          analysisResult.a4_top_right[0],
+          analysisResult.a4_top_right[1],
+          analysisResult.a4_bottom_right[0],
+          analysisResult.a4_bottom_right[1],
+          analysisResult.a4_bottom_left[0],
+          analysisResult.a4_bottom_left[1]
+        );
+
+        console.log(
+          "Orig Coords",
+          analysisResult.a4_top_left[0],
+          analysisResult.a4_top_left[1],
+          analysisResult.a4_top_right[0],
+          analysisResult.a4_top_right[1],
+          analysisResult.a4_bottom_right[0],
+          analysisResult.a4_bottom_right[1],
+          analysisResult.a4_bottom_left[0],
+          analysisResult.a4_bottom_left[1]
+        );
+
+        console.log(
+          "New Coords",
+          offsetWidth,
+          offsetHeight,
+          rescaleWidth - offsetWidth,
+          offsetHeight,
+          rescaleWidth - offsetWidth,
+          rescaleHeight - offsetHeight,
+          offsetWidth,
+          rescaleHeight - offsetHeight
+        );
+
+        const tTransform = new gm.Tensor("float32", [3, 1, 4]); // placeholder for transformation matrix
+
+        const scale = 3;
+        const imageWidth = analysisResult.ref_width * scale;
+        const imageHeight = analysisResult.ref_height * scale;
+
+        gm.generateTransformMatrix(
+          rect,
+          [imageHeight, imageWidth], // Inner image size
+          tTransform
+        );
+
+        const operation = gm.perspectiveProjection(
+          input,
+          tTransform,
+          [imageHeight, imageWidth, 4] // Outer image size
+        );
+
+        const sess = new gm.Session();
+        const output = gm.tensorFrom(operation) as gm.Tensor<gm.TensorDataView>;
+
+        sess.init(operation);
+        sess.runOp(operation, 0, output);
+
+        console.log("output", output);
+
+        // show output
+        const canvas = document.getElementById(
+          "output-image"
+        ) as HTMLCanvasElement;
+        canvas.width = output?.shape[1] || 0;
+        canvas.height = output?.shape[0] || 0;
+        gm.canvasFromTensor(canvas, output as any);
+
+      }
+
+      await transformImage();
+    </script>
+
+    <h1>OpenCV</h1>
+    <table>
+      <tr>
+        <td>
+          <p>Input Image:</p>
+          <img id="input-image" src="/image.jpg" width="300px" />
+        </td>
+        <td>
+          <p>Output Image:</p>
+          <img id="input-image" src="/image-result.jpg" width="300px" />
+        </td>
+      </tr>
+    </table>
+    <script>
+      import * as cv from '@techstark/opencv-js'
+      import { analysisResult } from "../data/data";
+
+      export async function runOpenCV(): Promise<Blob | null> {
+        console.log("Start Image Transformation");
+
+        (window as any).cv = cv;
+
+        const imgElement = document.getElementById('input-image') as HTMLImageElement;
+
+        console.log("0. imgElement", imgElement);
+
+        // Read the captured image from the HTMLImageElement
+        const srcImage = cv.imread(imgElement);
+        console.log("1. srcImage", srcImage);
+
+        // Create a matrix from the input analysis result coordinates
+        const srcCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+          analysisResult.a4_top_left[0],
+          analysisResult.a4_top_left[1],
+          analysisResult.a4_top_right[0],
+          analysisResult.a4_top_right[1],
+          analysisResult.a4_bottom_right[0],
+          analysisResult.a4_bottom_right[1],
+          analysisResult.a4_bottom_left[0],
+          analysisResult.a4_bottom_left[1],
+        ]);
+
+        console.log("2. srcCoords", srcCoords);
+
+        // Get the rescaled width and height from the analysis result
+        const rescaleWidth = analysisResult.rescale_width;
+        const rescaleHeight = analysisResult.rescale_height;
+
+        console.log("3. rescaleWidth", rescaleWidth);
+        console.log("3.1. rescaleHeight", rescaleHeight);
+
+        // Calculate the offset width and height based on the margin width and height from the analysis result
+        const offsetWidth = rescaleWidth * analysisResult.margin_width;
+        const offsetHeight = rescaleHeight * analysisResult.margin_height;
+
+        console.log("4. offsetWidth", offsetWidth);
+        console.log("4.1. offsetHeight", offsetHeight);
+
+        // Create a matrix for the destination coordinates, accounting for the offsets
+        const dstCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+          offsetWidth,
+          offsetHeight,
+          rescaleWidth - offsetWidth,
+          offsetHeight,
+          rescaleWidth - offsetWidth,
+          rescaleHeight - offsetHeight,
+          offsetWidth,
+          rescaleHeight - offsetHeight,
+        ]);
+        console.log("5. dstCoords", dstCoords);
+
+        // Calculate the perspective transform matrix
+        const transformMatrix = cv.getPerspectiveTransform(
+          srcCoords,
+          dstCoords
+        );
+        console.log("6. transformMatrix", transformMatrix);
+
+        // Free up memory by deleting the source and destination coordinate matrices
+        srcCoords.delete();
+        dstCoords.delete();
+
+        console.log("7. delete coords");
+
+        // Initialize an empty destination image and size
+        const dstImage = new cv.Mat();
+        const dstSize = new cv.Size(rescaleWidth, rescaleHeight);
+
+        // Apply the perspective transformation
+        cv.warpPerspective(srcImage, dstImage, transformMatrix, dstSize);
+        transformMatrix.delete();
+
+        // Initialize an empty resized image
+        const resizedImage = new cv.Mat();
+        // console.log('10. resizedImage', resizedImage);
+
+        // Resize the destination image to half its size
+        // cv.resize(
+        //   dstImage,
+        //   resizedImage,
+        //   new cv.Size(imageData.width, imageData.height)
+        // );
+
+        console.log("8. dstImage", dstImage);
+        console.log("9. dstSize", dstSize);
+
+        const canvas = document.createElement("canvas");
+        console.log("canvas", canvas);
+
+        // Display the resized image on the HTMLCanvasElement
+        cv.imshow(canvas, resizedImage);
+        console.log("11. cv.imshow");
+
+        return new Promise((resolve) => {
+          canvas.toBlob(resolve as any);
+
+          // Free up memory by deleting the destination and resized images
+          dstImage.delete();
+          resizedImage.delete();
+          console.log("12. delete images from memory");
+        });
+      }
+
+      await runOpenCV();
+    </script>
+  </body>
 </html>
